@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Yahoo!リアルタイム検索ツイート非表示
 // @namespace    http://tampermonkey.net/
-// @version      2.1
+// @version      2.2
 // @description  指定したユーザーのツイートを非表示にし、削除ボタンを追加します。削除したユーザーを記憶します。
 // @author       Refactored
 // @match        https://search.yahoo.co.jp/realtime/*
@@ -10,6 +10,64 @@
 
 (function() {
     'use strict';
+    
+    // ロガークラス
+    class Logger {
+        constructor() {
+            this.debugMode = false;
+            this.prefix = '[Yahoo Tweet Hider]';
+        }
+        
+        enableDebug() {
+            this.debugMode = true;
+            console.log(`${this.prefix} デバッグモードが有効になりました`);
+        }
+        
+        disableDebug() {
+            this.debugMode = false;
+        }
+        
+        info(message, data = null) {
+            console.log(`${this.prefix} ℹ️ ${message}`, data || '');
+        }
+        
+        success(message, data = null) {
+            console.log(`${this.prefix} ✅ ${message}`, data || '');
+        }
+        
+        error(message, data = null) {
+            console.error(`${this.prefix} ❌ ${message}`, data || '');
+        }
+        
+        debug(message, data = null) {
+            if (this.debugMode) {
+                console.log(`${this.prefix} 🐛 ${message}`, data || '');
+            }
+        }
+        
+        stats(message, data = null) {
+            console.log(`${this.prefix} 📊 ${message}`, data || '');
+        }
+        
+        clearAndShowInstructions() {
+            console.clear();
+            console.log(`
+${this.prefix} スクリプト起動完了！
+
+📋 使用方法:
+• 各ツイートに「非表示」ボタンが追加されます
+• ボタンをクリックしてユーザー全体またはツイート単体を非表示
+• 右上の「非表示管理」ボタンで設定を管理
+
+🔧 デバッグ有効化: Logger.enableDebug()
+🔇 デバッグ無効化: Logger.disableDebug()
+            `);
+        }
+    }
+    
+    // グローバルLoggerインスタンス
+    const Logger = new Logger();
+    window.Logger = Logger; // デバッグ用にグローバルに公開
     
     // 設定オブジェクト
     const CONFIG = {
@@ -81,7 +139,7 @@
                 const users = saved ? JSON.parse(saved) : [];
                 return new Set([...CONFIG.predefinedBlockedUsers, ...users]);
             } catch (error) {
-                console.error('非表示ユーザーの読み込みに失敗しました:', error);
+                Logger.error('非表示ユーザーの読み込みに失敗しました:', error);
                 return new Set(CONFIG.predefinedBlockedUsers);
             }
         }
@@ -96,7 +154,7 @@
                 const tweetIds = saved ? JSON.parse(saved) : [];
                 return new Set(tweetIds);
             } catch (error) {
-                console.error('非表示ツイートの読み込みに失敗しました:', error);
+                Logger.error('非表示ツイートの読み込みに失敗しました:', error);
                 return new Set();
             }
         }
@@ -111,7 +169,7 @@
                 );
                 localStorage.setItem(CONFIG.storageKeys.hiddenUsers, JSON.stringify(usersArray));
             } catch (error) {
-                console.error('非表示ユーザーの保存に失敗しました:', error);
+                Logger.error('非表示ユーザーの保存に失敗しました:', error);
             }
         }
 
@@ -122,7 +180,7 @@
             try {
                 localStorage.setItem(CONFIG.storageKeys.hiddenTweets, JSON.stringify(Array.from(this.hiddenTweetIds)));
             } catch (error) {
-                console.error('非表示ツイートの保存に失敗しました:', error);
+                Logger.error('非表示ツイートの保存に失敗しました:', error);
             }
         }
 
@@ -133,7 +191,7 @@
         addHiddenUser(userId) {
             this.hiddenUsers.add(userId);
             this.saveHiddenUsers();
-            console.log(`ユーザー @${userId} を非表示リストに追加しました`);
+            Logger.success(`ユーザー @${userId} を非表示リストに追加しました`);
         }
 
         /**
@@ -143,7 +201,7 @@
         removeHiddenUser(userId) {
             this.hiddenUsers.delete(userId);
             this.saveHiddenUsers();
-            console.log(`ユーザー @${userId} を非表示リストから削除しました`);
+            Logger.success(`ユーザー @${userId} を非表示リストから削除しました`);
         }
 
         /**
@@ -191,10 +249,57 @@
                 hiddenTweets: this.hiddenTweetIds.size
             };
         }
+        
+        /**
+         * 統計情報を出力
+         */
+        printStats() {
+            const stats = this.getStats();
+            Logger.stats('現在の統計', {
+                '非表示ユーザー数': stats.hiddenUsers,
+                '非表示ツイート数': stats.hiddenTweets,
+                '処理済みツイート数': document.querySelectorAll(CONFIG.selectors.deleteButton).length
+            });
+        }
     }
 
     // グローバルインスタンス
     const userManager = new UserManager();
+
+    /**
+     * ページ構造を分析する
+     */
+    function analyzePageStructure() {
+        Logger.debug('ページ構造分析開始');
+        
+        const analysis = {
+            'ツイートコンテナ': document.querySelectorAll(CONFIG.selectors.tweetContainer).length,
+            'ツイートリスト': !!document.querySelector(CONFIG.selectors.tweetList),
+            'URL': location.href,
+            'タイトル': document.title
+        };
+        
+        Logger.debug('ページ構造分析結果', analysis);
+        
+        // 代替セレクターの検索
+        if (analysis['ツイートコンテナ'] === 0) {
+            Logger.error('標準のツイートコンテナが見つかりません。代替セレクターを検索中...');
+            
+            const possibleContainers = [
+                '[class*="Tweet"]',
+                '[class*="tweet"]',
+                '[class*="bodyContainer"]',
+                '[class*="container"]'
+            ];
+            
+            possibleContainers.forEach(selector => {
+                const elements = document.querySelectorAll(selector);
+                if (elements.length > 0) {
+                    Logger.debug(`代替候補発見: ${selector}`, `要素数: ${elements.length}`);
+                }
+            });
+        }
+    }
 
     /**
      * ツイートIDを生成する（疑似的）
@@ -202,10 +307,15 @@
      * @returns {string} - ツイートID
      */
     function getTweetId(tweet) {
-        // ツイートのテキスト内容とユーザーIDからハッシュを生成
-        const userId = getUserId(tweet);
-        const tweetText = tweet.textContent.trim().substring(0, 100);
-        return btoa(`${userId}_${tweetText}`).replace(/[^a-zA-Z0-9]/g, '').substring(0, 16);
+        try {
+            // ツイートのテキスト内容とユーザーIDからハッシュを生成
+            const userId = getUserId(tweet);
+            const tweetText = tweet.textContent.trim().substring(0, 100);
+            return btoa(`${userId}_${tweetText}`).replace(/[^a-zA-Z0-9]/g, '').substring(0, 16);
+        } catch (error) {
+            Logger.error('ツイートID生成エラー:', error);
+            return 'unknown_' + Math.random().toString(36).substring(2, 15);
+        }
     }
 
     /**
@@ -214,10 +324,18 @@
      * @returns {string|null} - ユーザーID（@マークなし）
      */
     function getUserId(tweet) {
-        const authorElement = tweet.querySelector(CONFIG.selectors.authorId);
-        if (!authorElement) return null;
-        
-        return authorElement.innerText.replace('@', '').trim();
+        try {
+            const authorElement = tweet.querySelector(CONFIG.selectors.authorId);
+            if (!authorElement) {
+                Logger.debug('ユーザーID要素が見つかりません', tweet);
+                return null;
+            }
+            
+            return authorElement.innerText.replace('@', '').trim();
+        } catch (error) {
+            Logger.error('ユーザーID取得エラー:', error);
+            return null;
+        }
     }
 
     /**
@@ -226,8 +344,13 @@
      * @returns {string|null} - ユーザー名
      */
     function getUserName(tweet) {
-        const nameElement = tweet.querySelector(CONFIG.selectors.authorName);
-        return nameElement ? nameElement.innerText.trim() : null;
+        try {
+            const nameElement = tweet.querySelector(CONFIG.selectors.authorName);
+            return nameElement ? nameElement.innerText.trim() : 'Unknown User';
+        } catch (error) {
+            Logger.error('ユーザー名取得エラー:', error);
+            return 'Unknown User';
+        }
     }
 
     /**
@@ -263,23 +386,28 @@
             e.preventDefault();
             e.stopPropagation();
             
-            const tweetId = getTweetId(tweet);
-            const userName = getUserName(tweet);
-            
-            // 確認ダイアログ
-            const shouldHideUser = confirm(
-                `このユーザーのツイートを非表示にしますか？\n\n` +
-                `ユーザー: ${userName} (@${userId})\n\n` +
-                `「OK」: このユーザーの全ツイートを非表示\n` +
-                `「キャンセル」: このツイートのみ非表示`
-            );
-            
-            if (shouldHideUser) {
-                userManager.addHiddenUser(userId);
-                hideAllTweetsFromUser(userId);
-            } else {
-                userManager.addHiddenTweet(tweetId);
-                hideTweet(tweet);
+            try {
+                const tweetId = getTweetId(tweet);
+                const userName = getUserName(tweet);
+                
+                // 確認ダイアログ
+                const shouldHideUser = confirm(
+                    `このユーザーのツイートを非表示にしますか？\n\n` +
+                    `ユーザー: ${userName} (@${userId})\n\n` +
+                    `「OK」: このユーザーの全ツイートを非表示\n` +
+                    `「キャンセル」: このツイートのみ非表示`
+                );
+                
+                if (shouldHideUser) {
+                    userManager.addHiddenUser(userId);
+                    hideAllTweetsFromUser(userId);
+                } else {
+                    userManager.addHiddenTweet(tweetId);
+                    hideTweet(tweet);
+                    Logger.info(`ツイートを非表示にしました: ${userName}`);
+                }
+            } catch (error) {
+                Logger.error('ボタンクリック処理エラー:', error);
             }
         });
         
@@ -291,7 +419,12 @@
      * @param {Element} tweet - ツイート要素
      */
     function hideTweet(tweet) {
-        tweet.style.display = 'none';
+        try {
+            tweet.style.display = 'none';
+            tweet.setAttribute('data-hidden', 'true');
+        } catch (error) {
+            Logger.error('ツイート非表示エラー:', error);
+        }
     }
 
     /**
@@ -299,18 +432,22 @@
      * @param {string} userId - ユーザーID
      */
     function hideAllTweetsFromUser(userId) {
-        const tweets = document.querySelectorAll(CONFIG.selectors.tweetContainer);
-        let hiddenCount = 0;
-        
-        tweets.forEach(tweet => {
-            const tweetUserId = getUserId(tweet);
-            if (tweetUserId === userId) {
-                hideTweet(tweet);
-                hiddenCount++;
-            }
-        });
-        
-        console.log(`ユーザー @${userId} の ${hiddenCount} 件のツイートを非表示にしました`);
+        try {
+            const tweets = document.querySelectorAll(CONFIG.selectors.tweetContainer);
+            let hiddenCount = 0;
+            
+            tweets.forEach(tweet => {
+                const tweetUserId = getUserId(tweet);
+                if (tweetUserId === userId) {
+                    hideTweet(tweet);
+                    hiddenCount++;
+                }
+            });
+            
+            Logger.success(`ユーザー @${userId} の ${hiddenCount} 件のツイートを非表示にしました`);
+        } catch (error) {
+            Logger.error('ユーザーツイート一括非表示エラー:', error);
+        }
     }
 
     /**
@@ -327,26 +464,39 @@
      * @param {Element} tweet - ツイート要素
      */
     function processTweet(tweet) {
-        const userId = getUserId(tweet);
-        const tweetId = getTweetId(tweet);
-        
-        if (!userId) return;
-        
-        // ユーザーまたはツイートが非表示対象の場合は非表示
-        if (userManager.isUserHidden(userId) || userManager.isTweetHidden(tweetId)) {
-            hideTweet(tweet);
-            return;
-        }
-        
-        // 削除ボタンが既に存在する場合はスキップ
-        if (hasDeleteButton(tweet)) return;
-        
-        // 削除ボタンを追加
-        const deleteButton = createDeleteButton(tweet, userId);
-        const infoContainer = tweet.querySelector(CONFIG.selectors.infoContainer);
-        
-        if (infoContainer) {
-            infoContainer.appendChild(deleteButton);
+        try {
+            const userId = getUserId(tweet);
+            const tweetId = getTweetId(tweet);
+            
+            if (!userId) {
+                Logger.debug('ユーザーIDが取得できないツイートをスキップ');
+                return;
+            }
+            
+            // ユーザーまたはツイートが非表示対象の場合は非表示
+            if (userManager.isUserHidden(userId) || userManager.isTweetHidden(tweetId)) {
+                hideTweet(tweet);
+                Logger.debug(`ツイートを非表示: @${userId}`);
+                return;
+            }
+            
+            // 削除ボタンが既に存在する場合はスキップ
+            if (hasDeleteButton(tweet)) {
+                return;
+            }
+            
+            // 削除ボタンを追加
+            const deleteButton = createDeleteButton(tweet, userId);
+            const infoContainer = tweet.querySelector(CONFIG.selectors.infoContainer);
+            
+            if (infoContainer) {
+                infoContainer.appendChild(deleteButton);
+                Logger.debug(`削除ボタンを追加: @${userId}`);
+            } else {
+                Logger.debug('info container が見つかりません', tweet);
+            }
+        } catch (error) {
+            Logger.error('ツイート処理エラー:', error);
         }
     }
 
@@ -354,42 +504,55 @@
      * 全てのツイートを処理する
      */
     function processAllTweets() {
-        const tweets = document.querySelectorAll(CONFIG.selectors.tweetContainer);
-        tweets.forEach(processTweet);
+        try {
+            const tweets = document.querySelectorAll(CONFIG.selectors.tweetContainer);
+            Logger.debug(`${tweets.length} 件のツイートを処理中...`);
+            
+            tweets.forEach(processTweet);
+            
+            Logger.debug('全ツイート処理完了');
+        } catch (error) {
+            Logger.error('全ツイート処理エラー:', error);
+        }
     }
 
     /**
      * 管理パネルを表示する
      */
     function showManagementPanel() {
-        const stats = userManager.getStats();
-        const hiddenUsers = userManager.getHiddenUsers();
-        
-        let message = `=== 非表示管理 ===\n\n`;
-        message += `非表示ユーザー数: ${stats.hiddenUsers}\n`;
-        message += `非表示ツイート数: ${stats.hiddenTweets}\n\n`;
-        
-        if (hiddenUsers.length > 0) {
-            message += `非表示ユーザー一覧:\n`;
-            hiddenUsers.forEach((user, index) => {
-                message += `${index + 1}. @${user}\n`;
-            });
-            message += `\n特定のユーザーを表示に戻したい場合は、\nユーザー番号を入力してください（キャンセルで閉じる）:`;
+        try {
+            const stats = userManager.getStats();
+            const hiddenUsers = userManager.getHiddenUsers();
             
-            const input = prompt(message);
-            if (input) {
-                const userIndex = parseInt(input) - 1;
-                if (userIndex >= 0 && userIndex < hiddenUsers.length) {
-                    const userToShow = hiddenUsers[userIndex];
-                    userManager.removeHiddenUser(userToShow);
-                    alert(`@${userToShow} を表示に戻しました。ページを再読み込みしてください。`);
-                } else {
-                    alert('無効な番号です。');
+            let message = `=== 非表示管理 ===\n\n`;
+            message += `非表示ユーザー数: ${stats.hiddenUsers}\n`;
+            message += `非表示ツイート数: ${stats.hiddenTweets}\n\n`;
+            
+            if (hiddenUsers.length > 0) {
+                message += `非表示ユーザー一覧:\n`;
+                hiddenUsers.forEach((user, index) => {
+                    message += `${index + 1}. @${user}\n`;
+                });
+                message += `\n特定のユーザーを表示に戻したい場合は、\nユーザー番号を入力してください（キャンセルで閉じる）:`;
+                
+                const input = prompt(message);
+                if (input) {
+                    const userIndex = parseInt(input) - 1;
+                    if (userIndex >= 0 && userIndex < hiddenUsers.length) {
+                        const userToShow = hiddenUsers[userIndex];
+                        userManager.removeHiddenUser(userToShow);
+                        alert(`@${userToShow} を表示に戻しました。ページを再読み込みしてください。`);
+                    } else {
+                        alert('無効な番号です。');
+                    }
                 }
+            } else {
+                message += `非表示ユーザーはいません。`;
+                alert(message);
             }
-        } else {
-            message += `非表示ユーザーはいません。`;
-            alert(message);
+        } catch (error) {
+            Logger.error('管理パネル表示エラー:', error);
+            alert('管理パネルの表示中にエラーが発生しました。');
         }
     }
 
@@ -397,71 +560,96 @@
      * 管理ボタンを作成する
      */
     function createManageButton() {
-        if (document.querySelector(CONFIG.selectors.manageButton)) return;
-        
-        const button = document.createElement('button');
-        button.innerText = '非表示管理';
-        button.classList.add('custom-manage-btn');
-        button.title = '非表示にしたユーザーを管理します';
-        
-        // スタイルを適用
-        Object.entries(CONFIG.manageButtonStyles).forEach(([property, value]) => {
-            button.style.setProperty(property, value);
-        });
-        
-        button.addEventListener('click', showManagementPanel);
-        
-        document.body.appendChild(button);
+        try {
+            if (document.querySelector(CONFIG.selectors.manageButton)) return;
+            
+            const button = document.createElement('button');
+            button.innerText = '非表示管理';
+            button.classList.add('custom-manage-btn');
+            button.title = '非表示にしたユーザーを管理します';
+            
+            // スタイルを適用
+            Object.entries(CONFIG.manageButtonStyles).forEach(([property, value]) => {
+                button.style.setProperty(property, value);
+            });
+            
+            button.addEventListener('click', showManagementPanel);
+            
+            document.body.appendChild(button);
+            Logger.success('管理ボタンを作成しました');
+        } catch (error) {
+            Logger.error('管理ボタン作成エラー:', error);
+        }
     }
 
     /**
      * MutationObserverを初期化する
      */
     function initializeObserver() {
-        Logger.info('MutationObserver 初期化開始...');
-        
-        const targetNode = document.querySelector(CONFIG.selectors.tweetList);
-        if (!targetNode) {
-            Logger.error('ツイートリストが見つかりませんでした', {
-                '検索セレクター': CONFIG.selectors.tweetList,
-                '利用可能な要素': Array.from(document.querySelectorAll('*[class*="list"], *[class*="List"]')).map(el => el.className).slice(0, 10)
+        try {
+            Logger.info('MutationObserver 初期化開始...');
+            
+            const targetNode = document.querySelector(CONFIG.selectors.tweetList);
+            if (!targetNode) {
+                Logger.error('ツイートリストが見つかりませんでした', {
+                    '検索セレクター': CONFIG.selectors.tweetList,
+                    '利用可能な要素': Array.from(document.querySelectorAll('*[class*="list"], *[class*="List"]')).map(el => el.className).slice(0, 10)
+                });
+                
+                // 代替手段として body を監視
+                Logger.info('代替手段として body を監視します');
+                observeTarget(document.body);
+                return;
+            }
+            
+            Logger.success('ツイートリストを発見', {
+                'タグ名': targetNode.tagName,
+                'クラス名': targetNode.className,
+                '子要素数': targetNode.children.length
             });
-            return;
+            
+            observeTarget(targetNode);
+        } catch (error) {
+            Logger.error('MutationObserver初期化エラー:', error);
         }
-        
-        Logger.success('ツイートリストを発見', {
-            'タグ名': targetNode.tagName,
-            'クラス名': targetNode.className,
-            '子要素数': targetNode.children.length
-        });
-        
+    }
+    
+    /**
+     * 指定された要素を監視する
+     * @param {Element} targetNode - 監視対象の要素
+     */
+    function observeTarget(targetNode) {
         let mutationCount = 0;
         
         const observer = new MutationObserver((mutations) => {
-            mutationCount++;
-            let addedNodesCount = 0;
-            let shouldProcess = false;
-            
-            mutations.forEach((mutation) => {
-                if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
-                    addedNodesCount += mutation.addedNodes.length;
-                    shouldProcess = true;
-                }
-            });
-            
-            if (shouldProcess) {
-                Logger.debug(`DOM変更を検出`, {
-                    '変更回数': mutationCount,
-                    '追加ノード数': addedNodesCount,
-                    '変更タイプ': mutations.map(m => m.type).join(', ')
+            try {
+                mutationCount++;
+                let addedNodesCount = 0;
+                let shouldProcess = false;
+                
+                mutations.forEach((mutation) => {
+                    if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+                        addedNodesCount += mutation.addedNodes.length;
+                        shouldProcess = true;
+                    }
                 });
                 
-                // デバウンス処理
-                clearTimeout(window.tweetProcessingTimeout);
-                window.tweetProcessingTimeout = setTimeout(() => {
-                    Logger.debug('デバウンス処理後、ツイート処理を実行');
-                    processAllTweets();
-                }, 100);
+                if (shouldProcess) {
+                    Logger.debug(`DOM変更を検出`, {
+                        '変更回数': mutationCount,
+                        '追加ノード数': addedNodesCount,
+                        '変更タイプ': mutations.map(m => m.type).join(', ')
+                    });
+                    
+                    // デバウンス処理
+                    clearTimeout(window.tweetProcessingTimeout);
+                    window.tweetProcessingTimeout = setTimeout(() => {
+                        Logger.debug('デバウンス処理後、ツイート処理を実行');
+                        processAllTweets();
+                    }, 100);
+                }
+            } catch (error) {
+                Logger.error('MutationObserver処理エラー:', error);
             }
         });
         
@@ -484,64 +672,73 @@
         Logger.info('Yahoo!リアルタイム検索ツイート非表示スクリプト開始');
         Logger.info('==================================================');
         
-        const initialStats = userManager.getStats();
-        Logger.stats('初期統計情報', initialStats);
-        
-        // DOM 状態をチェック
-        Logger.info('DOM読み込み状態チェック', {
-            'readyState': document.readyState,
-            'URL': location.href,
-            'ツイートコンテナ数': document.querySelectorAll(CONFIG.selectors.tweetContainer).length,
-            'ツイートリスト存在': !!document.querySelector(CONFIG.selectors.tweetList)
-        });
-        
-        // DOM が完全に読み込まれてから実行
-        if (document.readyState === 'loading') {
-            Logger.info('DOM読み込み待機中...');
-            document.addEventListener('DOMContentLoaded', () => {
-                Logger.success('DOMContentLoaded イベント発火');
-                executeStartup();
+        try {
+            const initialStats = userManager.getStats();
+            Logger.stats('初期統計情報', initialStats);
+            
+            // DOM 状態をチェック
+            Logger.info('DOM読み込み状態チェック', {
+                'readyState': document.readyState,
+                'URL': location.href,
+                'ツイートコンテナ数': document.querySelectorAll(CONFIG.selectors.tweetContainer).length,
+                'ツイートリスト存在': !!document.querySelector(CONFIG.selectors.tweetList)
             });
-        } else {
-            Logger.info('DOM既に読み込み済み、即座に実行');
-            executeStartup();
+            
+            // DOM が完全に読み込まれてから実行
+            if (document.readyState === 'loading') {
+                Logger.info('DOM読み込み待機中...');
+                document.addEventListener('DOMContentLoaded', () => {
+                    Logger.success('DOMContentLoaded イベント発火');
+                    executeStartup();
+                });
+            } else {
+                Logger.info('DOM既に読み込み済み、即座に実行');
+                executeStartup();
+            }
+            
+            // 定期統計出力（5分毎）
+            setInterval(() => {
+                userManager.printStats();
+            }, 5 * 60 * 1000);
+            
+        } catch (error) {
+            Logger.error('初期化処理エラー:', error);
         }
-        
-        // 定期統計出力（5分毎）
-        setInterval(() => {
-            userManager.printStats();
-        }, 5 * 60 * 1000);
     }
 
     /**
      * スタートアップ処理を実行
      */
     function executeStartup() {
-        Logger.info('スタートアップ処理開始');
-        
-        // ページ構造を分析
-        analyzePageStructure();
-        
-        // 初回処理
-        processAllTweets();
-        
-        // 監視開始
-        initializeObserver();
-        
-        // 管理ボタン作成
-        createManageButton();
-        
-        // デバッグモード無効化（初期状態）
-        Logger.disableDebug();
-        
-        Logger.success('スタートアップ処理完了');
-        Logger.info('==================================================');
-        Logger.clearAndShowInstructions();
-        
-        // 10秒後に初期統計を出力
-        setTimeout(() => {
-            userManager.printStats();
-        }, 10000);
+        try {
+            Logger.info('スタートアップ処理開始');
+            
+            // ページ構造を分析
+            analyzePageStructure();
+            
+            // 初回処理
+            processAllTweets();
+            
+            // 監視開始
+            initializeObserver();
+            
+            // 管理ボタン作成
+            createManageButton();
+            
+            // デバッグモード無効化（初期状態）
+            Logger.disableDebug();
+            
+            Logger.success('スタートアップ処理完了');
+            Logger.info('==================================================');
+            Logger.clearAndShowInstructions();
+            
+            // 10秒後に初期統計を出力
+            setTimeout(() => {
+                userManager.printStats();
+            }, 10000);
+        } catch (error) {
+            Logger.error('スタートアップ処理エラー:', error);
+        }
     }
 
     // スクリプト開始
