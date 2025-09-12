@@ -4,7 +4,7 @@
 // @version      2.1
 // @description  指定したユーザーのツイートを非表示にし、削除ボタンを追加します。削除したユーザーを記憶します。
 // @author       Refactored
-// @match        https://search.yahoo.co.jp/realtime*
+// @match        https://search.yahoo.co.jp/realtime/*
 // @grant        none
 // ==/UserScript==
 
