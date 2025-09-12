@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Yahoo!リアルタイム検索ツイート非表示
 // @namespace   http://tampermonkey.net/
-// @version     2.5
+// @version     2.6
 // @description 指定したユーザーのツイートを非表示にし、削除ボタンを追加します。削除したユーザーを記憶します。
 // @author      Refactored & Gemini
 // @match       https://search.yahoo.co.jp/realtime*
@@ -38,7 +38,7 @@
             deleteButton: '.custom-delete-btn',
             manageButton: '.custom-manage-btn',
             fullTweet: '.Tweet_Tweet__sna2i',
-            fullTweetContainer: '.Tweet_TweetContainer__aezGm' // 新しく追加
+            fullTweetContainer: '.Tweet_TweetContainer__aezGm'
         },
 
         // ボタンのラベル
@@ -66,11 +66,6 @@
 
     // スクリプトのUIに適用するスタイル
     GM_addStyle(`
-        /* 新しく追加 */
-        ${CONFIG.selectors.fullTweetContainer} {
-            display: none !important;
-        }
-
         .custom-delete-btn {
             margin-left: 8px;
             padding: 2px 6px;
@@ -318,9 +313,11 @@ ${this.prefix} スクリプト起動完了！
      */
     function hideTweet(tweet) {
         try {
-            const fullTweetElement = tweet.closest(CONFIG.selectors.fullTweetContainer);
-            if (fullTweetElement) {
-                fullTweetElement.style.display = 'none';
+            // 最も上位のツイートコンテナを特定
+            const tweetContainer = tweet.closest(CONFIG.selectors.fullTweetContainer) || tweet.closest(CONFIG.selectors.fullTweet);
+
+            if (tweetContainer) {
+                tweetContainer.style.display = 'none';
             } else {
                 tweet.style.display = 'none';
             }
@@ -417,10 +414,10 @@ ${this.prefix} スクリプト起動完了！
             }
 
             // 削除ボタンを追加
-            const deleteButton = createDeleteButton(tweet, userId);
             const infoContainer = tweet.querySelector(CONFIG.selectors.infoContainer);
 
             if (infoContainer) {
+                const deleteButton = createDeleteButton(tweet, userId);
                 infoContainer.appendChild(deleteButton);
                 logger.debug(`削除ボタンを追加: @${userId}`);
             } else {
