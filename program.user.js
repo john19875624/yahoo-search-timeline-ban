@@ -418,25 +418,50 @@
      * MutationObserverを初期化する
      */
     function initializeObserver() {
+        Logger.info('MutationObserver 初期化開始...');
+        
         const targetNode = document.querySelector(CONFIG.selectors.tweetList);
         if (!targetNode) {
-            console.warn('ツイートリストが見つかりませんでした');
+            Logger.error('ツイートリストが見つかりませんでした', {
+                '検索セレクター': CONFIG.selectors.tweetList,
+                '利用可能な要素': Array.from(document.querySelectorAll('*[class*="list"], *[class*="List"]')).map(el => el.className).slice(0, 10)
+            });
             return;
         }
         
+        Logger.success('ツイートリストを発見', {
+            'タグ名': targetNode.tagName,
+            'クラス名': targetNode.className,
+            '子要素数': targetNode.children.length
+        });
+        
+        let mutationCount = 0;
+        
         const observer = new MutationObserver((mutations) => {
+            mutationCount++;
+            let addedNodesCount = 0;
             let shouldProcess = false;
             
             mutations.forEach((mutation) => {
                 if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+                    addedNodesCount += mutation.addedNodes.length;
                     shouldProcess = true;
                 }
             });
             
             if (shouldProcess) {
+                Logger.debug(`DOM変更を検出`, {
+                    '変更回数': mutationCount,
+                    '追加ノード数': addedNodesCount,
+                    '変更タイプ': mutations.map(m => m.type).join(', ')
+                });
+                
                 // デバウンス処理
                 clearTimeout(window.tweetProcessingTimeout);
-                window.tweetProcessingTimeout = setTimeout(processAllTweets, 100);
+                window.tweetProcessingTimeout = setTimeout(() => {
+                    Logger.debug('デバウンス処理後、ツイート処理を実行');
+                    processAllTweets();
+                }, 100);
             }
         });
         
@@ -445,29 +470,66 @@
             subtree: true
         });
         
-        console.log('MutationObserver が初期化されました');
+        Logger.success('MutationObserver が初期化されました', {
+            '監視対象': targetNode.tagName,
+            '監視オプション': 'childList: true, subtree: true'
+        });
     }
 
     /**
      * 初期化処理
      */
     function initialize() {
-        console.log('Yahoo!リアルタイム検索ツイート非表示スクリプトを開始しました');
-        console.log(`非表示ユーザー数: ${userManager.getStats().hiddenUsers}`);
-        console.log(`非表示ツイート数: ${userManager.getStats().hiddenTweets}`);
+        Logger.info('==================================================');
+        Logger.info('Yahoo!リアルタイム検索ツイート非表示スクリプト開始');
+        Logger.info('==================================================');
+        
+        const initialStats = userManager.getStats();
+        Logger.stats('初期統計情報', initialStats);
+        
+        // DOM 状態をチェック
+        Logger.info('DOM読み込み状態チェック', {
+            'readyState': document.readyState,
+            'URL': location.href,
+            'ツイートコンテナ数': document.querySelectorAll(CONFIG.selectors.tweetContainer).length,
+            'ツイートリスト存在': !!document.querySelector(CONFIG.selectors.tweetList)
+        });
         
         // DOM が完全に読み込まれてから実行
         if (document.readyState === 'loading') {
+            Logger.info('DOM読み込み待機中...');
             document.addEventListener('DOMContentLoaded', () => {
-                processAllTweets();
-                initializeObserver();
-                createManageButton();
+                Logger.success('DOMContentLoaded イベント発火');
+                executeStartup();
             });
         } else {
-            processAllTweets();
-            initializeObserver();
-            createManageButton();
+            Logger.info('DOM既に読み込み済み、即座に実行');
+            executeStartup();
         }
+        
+        // 定期統計出力（5分毎）
+        setInterval(() => {
+            userManager.printStats();
+        }, 5 * 60 * 1000);
+    }
+
+    /**
+     * スタートアップ処理を実行
+     */
+    function executeStartup() {
+        Logger.info('スタートアップ処理開始');
+        
+        processAllTweets();
+        initializeObserver();
+        createManageButton();
+        
+        Logger.success('スタートアップ処理完了');
+        Logger.info('==================================================');
+        
+        // 10秒後に初期統計を出力
+        setTimeout(() => {
+            userManager.printStats();
+        }, 10000);
     }
 
     // スクリプト開始
