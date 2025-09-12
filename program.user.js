@@ -732,10 +732,18 @@ ${this.prefix} スクリプト起動完了！
             Logger.info('==================================================');
             Logger.clearAndShowInstructions();
             
-            // 10秒後に初期統計を出力
+            // 詳細な初期統計を出力
             setTimeout(() => {
+                const detailedStats = {
+                    ...userManager.getStats(),
+                    'ページURL': location.href,
+                    '読み込み完了時刻': new Date().toLocaleString(),
+                    '初期ツイート数': document.querySelectorAll(CONFIG.selectors.tweetContainer).length,
+                    '追加ボタン数': document.querySelectorAll(CONFIG.selectors.deleteButton).length
+                };
+                Logger.stats('初期統計レポート', detailedStats);
                 userManager.printStats();
-            }, 10000);
+            }, 3000); // 3秒後に統計出力
         } catch (error) {
             Logger.error('スタートアップ処理エラー:', error);
         }
