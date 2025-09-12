@@ -519,12 +519,24 @@
     function executeStartup() {
         Logger.info('スタートアップ処理開始');
         
+        // ページ構造を分析
+        analyzePageStructure();
+        
+        // 初回処理
         processAllTweets();
+        
+        // 監視開始
         initializeObserver();
+        
+        // 管理ボタン作成
         createManageButton();
+        
+        // デバッグモード無効化（初期状態）
+        Logger.disableDebug();
         
         Logger.success('スタートアップ処理完了');
         Logger.info('==================================================');
+        Logger.clearAndShowInstructions();
         
         // 10秒後に初期統計を出力
         setTimeout(() => {
